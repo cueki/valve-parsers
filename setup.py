@@ -5,13 +5,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="valve-parsers",
-    version="1.0.0",
+    version="1.0.1",
     author="Madison Lovett",
     description="Python library for parsing Valve game files (VPK and PCF)",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/cueki/valve-parsers",
-    packages=find_packages(),
+    packages=["valve_parsers"],
+    package_dir={"valve_parsers": "src"},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
