@@ -1,9 +1,9 @@
 # Valve Parsers
 
-A Python library for parsing Valve game engine files, extracted from my casual-preloader project. This library provides support for:
+A Python library for parsing Valve game files, extracted from my casual-preloader project. This library provides support for:
 
 - **VPK (Valve Package)** files - Valve's archive format used in Source engine games
-- **PCF (Particle Cache File)** files - Valve's particle system files - **See constants.py for supported versions**
+- **PCF (Particle)** files - Valve's particle system files - **See constants.py for supported versions**
 
 ## Features
 
