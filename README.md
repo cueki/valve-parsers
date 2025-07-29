@@ -187,8 +187,9 @@ MIT License - See LICENSE file for details.
 This library was extracted from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
-
 ### 1.0.1
+- Nothing
+### 1.0.0
 - Initial release
 - VPK parsing and creation support
 - PCF parsing and encoding support
