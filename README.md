@@ -173,7 +173,9 @@ This library works with VPK and PCF files from Orange Box titles.
 Mostly intended for TF2, YMMV with other games.
 
 See: 
-https://developer.valvesoftware.com/wiki/PCF
+
+https://developer.valvesoftware.com/wiki/PCF 
+
 https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
 ## License
