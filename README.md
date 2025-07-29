@@ -187,6 +187,8 @@ MIT License - See LICENSE file for details.
 This library was extracted from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.0.2
+- Single file VPK no longer has _dir name
 ### 1.0.1
 - Nothing
 ### 1.0.0

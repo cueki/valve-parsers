@@ -281,11 +281,13 @@ class VPKFile:
                 return False
 
             vpk_structure = cls._build_vpk_structure(files)
-            dir_path = f"{base_output_path}_dir.vpk"
 
             if split_size is None:
-                return cls._create_single_vpk(vpk_structure, dir_path)
+                # for single-file VPK use the provided path directly
+                output_path = f"{base_output_path}.vpk" if not str(base_output_path).endswith('.vpk') else str(base_output_path)
+                return cls._create_single_vpk(vpk_structure, output_path)
             else:
+                # for multi-file VPK use _dir.vpk naming convention
                 return cls._create_multi_vpk(vpk_structure, base_output_path, split_size)
         except Exception as e:
             print(f"Error creating VPK: {e}")

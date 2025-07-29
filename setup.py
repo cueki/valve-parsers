@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="valve-parsers",
-    version="1.0.1",
+    version="1.0.2",
     author="Madison Lovett",
     description="Python library for parsing Valve game files (VPK and PCF)",
     long_description=long_description,
