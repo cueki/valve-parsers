@@ -188,7 +188,7 @@ This library was extracted from my casual-pre-loader project. Contributions are 
 
 ## Changelog
 
-### 1.0.0
+### 1.0.1
 - Initial release
 - VPK parsing and creation support
 - PCF parsing and encoding support
