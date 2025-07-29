@@ -178,13 +178,9 @@ https://developer.valvesoftware.com/wiki/PCF
 
 https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
-## License
-
-MIT License - See LICENSE file for details.
-
 ## Contributing
 
-This library was extracted from my casual-pre-loader project. Contributions are welcome!
+This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
 ### 1.0.2
