@@ -47,7 +47,7 @@ if entry_info:
     print(f"File size: {entry.entry_length} bytes")
     print(f"Archive index: {entry.archive_index}")
     
-# Patch file
+# Patch a file
 # Read a new material file from disk
 new_texture_path = "my_custom_material.vmt"
 with open(new_texture_path, 'rb') as f:
