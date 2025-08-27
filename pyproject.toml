@@ -4,15 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valve-parsers"
-version = "1.0.2"
+version = "1.0.4"
 description = "Python library for parsing Valve game files (VPK and PCF)"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
+
 authors = [
     {name = "cueki"},
 ]
+
 keywords = ["valve", "vpk", "pcf", "particle", "steam", "source engine", "team fortress", "tf2", "half-life", "parser", "archive", "modding"]
+
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -34,5 +37,6 @@ Homepage = "https://github.com/cueki/valve-parsers"
 Repository = "https://github.com/cueki/valve-parsers"
 Issues = "https://github.com/cueki/valve-parsers/issues"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["valve_parsers"]
+package-dir = {valve_parsers = "src"}
