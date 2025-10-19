@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valve-parsers"
-version = "1.0.5"
+version = "1.0.6"
 description = "Python library for parsing Valve game files (VPK and PCF)"
 readme = "README.md"
 requires-python = ">=3.8"

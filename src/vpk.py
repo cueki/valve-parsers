@@ -52,17 +52,7 @@ class VPKDirectoryEntry:
 
 
 def _parse_vpk_path(filepath: str) -> Tuple[str, str, str]:
-    """Parse a file path into VPK directory components.
-
-    Args:
-        filepath: Path to parse (e.g., "materials/models/bots/heavy/heavy_bot_red.vmt")
-
-    Returns:
-        Tuple of (extension, directory, filename) where:
-        - extension: File extension without dot (e.g., "vmt") or ' ' if none
-        - directory: Directory path (e.g., "materials/models") or ' ' if root
-        - filename: Filename without extension (e.g., "heavy_bot_red")
-    """
+    """Parse a file path into VPK components (extension, directory, filename)."""
     filepath = filepath.replace('\\', '/')
 
     last_slash = filepath.rfind('/')
@@ -84,7 +74,8 @@ def _parse_vpk_path(filepath: str) -> Tuple[str, str, str]:
     return extension, directory, filename
 
 
-def read_null_string(file: BinaryIO) -> str:
+def _read_null_string(file: BinaryIO) -> str:
+    """Read a null-terminated ASCII string from a binary file."""
     chunk_size = 256
     buffer = bytearray()
     bad_result = bytearray()
@@ -153,6 +144,7 @@ class VPKFile:
             self.parse_directory()
 
     def _setup_paths(self):
+        """Set up paths for VPK file(s) - determines if single or multi-file archive."""
         if self.vpk_path.endswith('_dir.vpk'):
             self.is_dir_vpk = True
             self.dir_path = self.vpk_path
@@ -190,17 +182,17 @@ class VPKFile:
             f.seek(tree_offset)
 
             while True:
-                extension = read_null_string(f)
+                extension = _read_null_string(f)
                 if not extension:
                     break
 
                 while True:
-                    path = read_null_string(f)
+                    path = _read_null_string(f)
                     if not path:
                         break
 
                     while True:
-                        filename = read_null_string(f)
+                        filename = _read_null_string(f)
                         if not filename:
                             break
 
@@ -216,6 +208,7 @@ class VPKFile:
         return self
 
     def _calculate_header_and_tree_offset(self) -> int:
+        """Calculate offset for single-file VPK archives."""
         try:
             with open(self.dir_path, 'rb') as f:
                 header = f.read(28)
@@ -329,22 +322,8 @@ class VPKFile:
 
         return None
 
-    def get_file_entry(self, filepath: str) -> Optional[Tuple[str, str, VPKDirectoryEntry]]:
-        """Get detailed information about a file in the VPK.
-
-        Args:
-            filepath: Path of the file within the VPK archive.
-
-        Returns:
-            Tuple of (extension, directory, entry) if found, None otherwise.
-            The entry contains size, offset, and other metadata.
-
-        Example:
-            >>> entry_info = vpk.get_file_entry("materials/example.vmt")
-            >>> if entry_info:
-            ...     _ext, _dir, entry = entry_info
-            ...     print(f"File size: {entry.entry_length} bytes")
-        """
+    def _get_file_entry(self, filepath: str) -> Optional[Tuple[str, str, VPKDirectoryEntry]]:
+        """Get raw directory entry for a file. Use get_file_info() for public API."""
         self._ensure_parsed()
         try:
             extension, directory, filename = _parse_vpk_path(filepath)
@@ -372,7 +351,7 @@ class VPKFile:
             >>> if success:
             ...     print("File extracted successfully")
         """
-        entry_info = self.get_file_entry(filepath)
+        entry_info = self._get_file_entry(filepath)
         if not entry_info:
             return False
 
@@ -413,7 +392,7 @@ class VPKFile:
             ...     new_content = f.read()
             >>> success = vpk.patch_file("materials/example.vmt", new_content, create_backup=True)
         """
-        entry_info = self.get_file_entry(filepath)
+        entry_info = self._get_file_entry(filepath)
         if not entry_info:
             return False
 
@@ -504,6 +483,7 @@ class VPKFile:
 
     @staticmethod
     def _build_vpk_structure(files):
+        """Build internal VPK directory structure from file list."""
         vpk_structure = {}
         for file_path, rel_path_str in files:
             extension, path, filename = _parse_vpk_path(rel_path_str)
@@ -525,6 +505,7 @@ class VPKFile:
 
     @staticmethod
     def _write_vpk_header(f, tree_size=0, embed_chunk_length=0):
+        """Write VPK header structure to file."""
         tree_size_pos = 8
         embed_chunk_length_pos = 12
         header = struct.pack('<7I', 0x55AA1234, 2, tree_size, embed_chunk_length, 0, 48, 0)
@@ -533,6 +514,7 @@ class VPKFile:
 
     @staticmethod
     def _write_directory_tree(f, vpk_structure, archive_entries=None):
+        """Write VPK directory tree structure to file."""
         entry_positions = []
         archive_offset = 0
 
@@ -568,6 +550,7 @@ class VPKFile:
 
     @staticmethod
     def _write_checksums(f, dir_start, dir_size):
+        """Write MD5 checksums to VPK file."""
         tree_md5 = md5()
         f.seek(dir_start)
         tree_md5.update(f.read(dir_size))
@@ -587,6 +570,7 @@ class VPKFile:
 
     @staticmethod
     def _create_single_vpk(vpk_structure, output_path):
+        """Create a single-file VPK archive."""
         try:
             with open(output_path, 'w+b') as f:
                 tree_size_pos, embed_chunk_length_pos = VPKFile._write_vpk_header(f)
@@ -627,6 +611,7 @@ class VPKFile:
 
     @staticmethod
     def _create_multi_vpk(vpk_structure, base_output_path, split_size):
+        """Create a multi-file VPK archive with size-based splitting."""
         try:
             archive_entries = {}
             current_archive_idx = 0
@@ -697,6 +682,7 @@ class VPKFile:
             return False
 
     def _ensure_parsed(self) -> None:
+        """Ensure directory has been parsed before use."""
         if not self._parsed:
             self.parse_directory()
 
@@ -794,7 +780,7 @@ class VPKFile:
             ...     content = data.decode('utf-8')  # for text files
         """
         self._ensure_parsed()
-        entry_info = self.get_file_entry(filepath)
+        entry_info = self._get_file_entry(filepath)
         if not entry_info:
             return None
 
@@ -830,7 +816,7 @@ class VPKFile:
             ...     print("File found!")
         """
         self._ensure_parsed()
-        return self.get_file_entry(filepath) is not None
+        return self._get_file_entry(filepath) is not None
 
     def get_file_info(self, filepath: str) -> Optional[Dict[str, Any]]:
         """Get comprehensive information about a file.
@@ -849,7 +835,7 @@ class VPKFile:
             ...     print(f"CRC: 0x{info['crc']:08X}")
         """
         self._ensure_parsed()
-        entry_info = self.get_file_entry(filepath)
+        entry_info = self._get_file_entry(filepath)
         if not entry_info:
             return None
 

@@ -21,44 +21,76 @@ pip install valve-parsers
 
 ## Quick Start (Parsing + Modification)
 
-### VPK Files
+### Creating VPK Archives
 
 ```python
 from valve_parsers import VPKFile
 
-# Open and parse a VPK file
-vpk = VPKFile("path/to/archive.vpk").parse_directory()
+# Create a single-file VPK
+success = VPKFile.create("source_directory", "output/archive.vpk")
+
+# Create a multi-file VPK with size limit (100MB per archive split)
+success = VPKFile.create("source_directory", "output/archive", split_size=100*1024*1024)
+```
+
+### Working with VPK Archives
+
+```python
+from valve_parsers import VPKFile
+
+# Open a VPK file
+vpk = VPKFile("path/to/archive.vpk")
 
 # List all files
 files = vpk.list_files()
 print(f"Found {len(files)} files")
 
-# Find specific files
+# Find files matching a pattern
 texture_files = vpk.list_files(extension="vtf")
 material_files = vpk.find_files("materials/*.vmt")
 
 # Extract a file
 vpk.extract_file("materials/models/player/scout.vmt", "output/scout.vmt")
 
-# Get file information
-entry_info = vpk.get_file_entry("scripts/game_sounds.txt")
-if entry_info:
-    extension, directory, entry = entry_info
-    print(f"File size: {entry.entry_length} bytes")
-    print(f"Archive index: {entry.archive_index}")
+# Or load it directly into memory
+file_data = vpk.get_file_data("materials/models/player/scout.vmt")
+if file_data:
+    content = file_data.decode('utf-8')
     
 # Patch a file
 # Read a new material file from disk
-new_texture_path = "my_custom_material.vmt"
+new_texture_path = "custom_scout_red.vmt"
 with open(new_texture_path, 'rb') as f:
     new_texture_data = f.read()
 
 # Target file path inside the VPK
 target_file = "materials/models/player/scout_red.vmt"
 
-# Optionally create a backup before modification
-vpk.patch_file(target_file, new_texture_data, create_backup=False)
+# Check if a file exists
+if vpk.file_exists(target_file):
+    print("File found!")
+    # Get file info
+    info = vpk.get_file_info(target_file)
+    if info:
+        print(f"Size: {info['size']} bytes, CRC: 0x{info['crc']:08X}")
+        # IMPORTANT: Patched files must match original size exactly!
+        original_size = info['size']
+        if len(new_texture_data) != original_size:
+            if len(new_texture_data) < original_size:
+                # Pad with spaces to match original size
+                padding_needed = original_size - len(new_texture_data)
+                print(f"Adding {padding_needed} bytes of padding")
+                new_texture_data = new_texture_data + b' ' * padding_needed
+            else:
+                print(f"ERROR: New file is {len(new_texture_data) - original_size} bytes larger!")
+                print("File cannot be patched - size must match exactly")
+    
+        # Now patch the file
+        vpk.patch_file(target_file, new_texture_data, create_backup=False)
 
+# Extract all files matching a pattern
+count = vpk.extract_all("output_dir", pattern="materials/*.vmt")
+print(f"Extracted {count} material files")
 ```
 
 ### PCF Files
@@ -87,18 +119,30 @@ for i, element in enumerate(pcf.elements):
 
 # Encode back to file
 pcf.encode("output/modified_particles.pcf")
-```
 
-### Creating VPK Archives
+# Find a specific element by name
+element = pcf.find_element_by_name("my_explosion_effect")
+if element:
+    print(f"Found element with {len(element.attributes)} attributes")
 
-```python
-from valve_parsers import VPKFile
+# Get all elements of a specific type
+operators = pcf.get_elements_by_type('DmeParticleOperator')
+print(f"Found {len(operators)} operators")
 
-# Create a single-file VPK
-success = VPKFile.create("source_directory", "output/archive.vpk")
+# Get and set attribute values with helper methods
+from valve_parsers import AttributeType
 
-# Create a multi-file VPK with size limit (100MB per archive spit)
-success = VPKFile.create("source_directory", "output/archive", split_size=100*1024*1024)
+element = pcf.find_element_by_name("my_effect")
+if element:
+    # Get attribute value
+    radius = pcf.get_attribute_value(element, "radius", default=5.0)
+    print(f"Current radius: {radius}")
+
+    # Set attribute value
+    pcf.set_attribute_value(element, "radius", 10.0, AttributeType.FLOAT)
+    pcf.set_attribute_value(element, "color", (255, 0, 0, 255), AttributeType.COLOR)
+
+pcf.encode("output/modified_particles.pcf")
 ```
 
 ## API Reference
@@ -108,16 +152,22 @@ success = VPKFile.create("source_directory", "output/archive", split_size=100*10
 The main class for working with VPK archives.
 
 #### Constructor
-- `VPKFile(vpk_path: str)` - Initialize with path to VPK file
+- `VPKFile(vpk_path: Union[str, Path], auto_parse: bool = True)` - Initialize with path to VPK file
+  - `vpk_path`: Path to the VPK file
+  - `auto_parse`: Automatically parse directory on init (default: True)
 
 #### Methods
-- `parse_directory() -> VPKFile` - Parse the VPK directory structure
+- `parse_directory() -> VPKFile` - Parse the VPK directory structure (called automatically unless `auto_parse=False`)
 - `list_files(extension: str = None, path: str = None) -> List[str]` - List files with optional filtering
 - `find_files(pattern: str) -> List[str]` - Find files matching a glob pattern
 - `find_file_path(filename: str) -> Optional[str]` - Find the full path of a filename
 - `extract_file(filepath: str, output_path: str) -> bool` - Extract a file from the archive
+- `extract_all(output_dir: str, pattern: str = None) -> int` - Extract multiple files to a directory
 - `patch_file(filepath: str, new_data: bytes, create_backup: bool = False) -> bool` - Modify a file in the archive
-- `create(source_dir: str, output_base_path: str, split_size: int = None) -> bool` - Create new VPK archive
+- `get_file_data(filepath: str) -> Optional[bytes]` - Read a file's contents directly into memory
+- `file_exists(filepath: str) -> bool` - Check if a file exists in the archive
+- `get_file_info(filepath: str) -> Optional[Dict]` - Get comprehensive information about a file
+- `create(source_dir: str, output_base_path: str, split_size: int = None) -> bool` - Create new VPK archive (class method)
 
 #### Properties
 - `directory` - Parsed directory structure
@@ -146,6 +196,10 @@ The main class for working with PCF particle files.
 #### Methods
 - `decode() -> PCFFile` - Parse the PCF file
 - `encode(output_path: Union[Path, str]) -> PCFFile` - Write PCF file to disk
+- `find_element_by_name(name: str) -> Optional[PCFElement]` - Find a particle element by its name
+- `get_elements_by_type(type_name: str) -> List[PCFElement]` - Get all elements of a specific type
+- `get_attribute_value(element: PCFElement, attr_name: str, default=None)` - Get an attribute value from an element (static method)
+- `set_attribute_value(element: PCFElement, attr_name: str, value, attr_type: AttributeType)` - Set an attribute value on an element
 
 #### Properties
 - `version` - PCF version string
@@ -183,6 +237,15 @@ https://developer.valvesoftware.com/wiki/VPK_(file_format)
 This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.0.6
+- Updated README with corrected examples
+- Added documentation for all VPK methods: extract_all(), get_file_data(), file_exists(), get_file_info()
+- Added file patching size-checking examples
+- Made get_file_entry() private
+- Cleaned up internal method documentation
+### 1.0.5
+- Auto-parse support
+- Reading and writing is now 2-3x faster
 ### 1.0.2
 - Single file VPK no longer has _dir name
 ### 1.0.1
