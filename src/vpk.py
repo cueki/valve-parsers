@@ -4,16 +4,16 @@ import traceback
 from hashlib import md5
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Dict, Optional, BinaryIO, List, Tuple, Union
+from typing import Dict, Optional, BinaryIO, List, Tuple, Union, Any
 
 # see: https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
 @dataclass
 class VPKDirectoryEntry:
     """Metadata for a file entry within a VPK archive.
-    
+
     Contains information needed to locate and extract the file data.
-    
+
     Attributes:
         crc: CRC32 checksum of the file data.
         preload_bytes: Number of bytes stored inline in the directory.
@@ -31,18 +31,14 @@ class VPKDirectoryEntry:
 
     @classmethod
     def from_file(cls, file: BinaryIO) -> 'VPKDirectoryEntry':
-        crc = struct.unpack('<I', file.read(4))[0]
-        crc = int.from_bytes(crc.to_bytes(4, 'little'), 'big')
-
-        entry_format = '<HHII'
-        data = struct.unpack(entry_format, file.read(struct.calcsize(entry_format)))
+        data = struct.unpack('<IHHII', file.read(16))
 
         entry = cls(
-            crc=crc,
-            preload_bytes=data[0],
-            archive_index=data[1],
-            entry_offset=data[2],
-            entry_length=data[3]
+            crc=data[0],
+            preload_bytes=data[1],
+            archive_index=data[2],
+            entry_offset=data[3],
+            entry_length=data[4]
         )
 
         if entry.preload_bytes > 0:
@@ -55,40 +51,87 @@ class VPKDirectoryEntry:
         return entry
 
 
+def _parse_vpk_path(filepath: str) -> Tuple[str, str, str]:
+    """Parse a file path into VPK directory components.
+
+    Args:
+        filepath: Path to parse (e.g., "materials/models/bots/heavy/heavy_bot_red.vmt")
+
+    Returns:
+        Tuple of (extension, directory, filename) where:
+        - extension: File extension without dot (e.g., "vmt") or ' ' if none
+        - directory: Directory path (e.g., "materials/models") or ' ' if root
+        - filename: Filename without extension (e.g., "heavy_bot_red")
+    """
+    filepath = filepath.replace('\\', '/')
+
+    last_slash = filepath.rfind('/')
+    if last_slash >= 0:
+        directory = filepath[:last_slash]
+        filename_ext = filepath[last_slash + 1:]
+    else:
+        directory = ' '
+        filename_ext = filepath
+
+    last_dot = filename_ext.rfind('.')
+    if last_dot > 0:
+        filename = filename_ext[:last_dot]
+        extension = filename_ext[last_dot + 1:]
+    else:
+        filename = filename_ext
+        extension = ' '
+
+    return extension, directory, filename
+
+
 def read_null_string(file: BinaryIO) -> str:
-    result = bytearray()
+    chunk_size = 256
+    buffer = bytearray()
     bad_result = bytearray()
     had_data = False
 
     while True:
-        char = file.read(1)
-        if not char or char == b'\x00':
+        chunk = file.read(chunk_size)
+        if not chunk:
             break
-        had_data = True
 
-        if 32 <= char[0] <= 126:
-            result.extend(char)
+        null_pos = chunk.find(b'\x00')
+        if null_pos != -1:
+            had_data = had_data or (null_pos > 0)
+            for i in range(null_pos):
+                byte = chunk[i]
+                if 32 <= byte <= 126:
+                    buffer.append(byte)
+                else:
+                    bad_result.append(byte)
+            file.seek(-(len(chunk) - null_pos - 1), 1)
+            break
         else:
-            bad_result.extend(char)
+            had_data = True
+            for byte in chunk:
+                if 32 <= byte <= 126:
+                    buffer.append(byte)
+                else:
+                    bad_result.append(byte)
 
-    if had_data and not result:
+    if had_data and not buffer:
         print(f"[VPK] All chars filtered, bad_result: {bad_result.hex()}")
 
-    return result.decode("ascii")
+    return buffer.decode("ascii")
 
 
 class VPKFile:
     """A parser for Valve Package (VPK) files.
-    
+
     VPK files are Valve's archive format used in Source engine games to store
     game assets like textures, models, sounds, and scripts.
-    
+
     Args:
         vpk_path: Path to the VPK file. Can be a single .vpk file or a _dir.vpk file
                  for multi-file archives. Accepts str or Path objects.
         auto_parse: Whether to automatically parse the directory on initialization.
                    Defaults to True for convenience.
-    
+
     Example:
         >>> vpk = VPKFile("pak01_dir.vpk")  # Auto-parses by default
         >>> files = vpk.list_files()
@@ -132,12 +175,12 @@ class VPKFile:
 
     def parse_directory(self) -> 'VPKFile':
         """Parse the VPK directory structure to enable file operations.
-        
+
         Must be called before using file listing, extraction, or patching methods.
-        
+
         Returns:
             Self for method chaining.
-            
+
         Raises:
             IOError: If the VPK file cannot be read.
             ValueError: If the VPK format is invalid.
@@ -179,7 +222,7 @@ class VPKFile:
                 if len(header) != 28:
                     raise ValueError(f"Invalid VPK header: expected 28 bytes, got {len(header)}")
 
-                tree_size = int.from_bytes(header[8:12], 'little')
+                tree_size = struct.unpack('<I', header[8:12])[0]
                 self.header_and_tree_offset = 28 + tree_size
                 return self.header_and_tree_offset
         except Exception as e:
@@ -207,14 +250,14 @@ class VPKFile:
 
     def list_files(self, extension: Optional[str] = None, path: Optional[str] = None) -> List[str]:
         """List all files in the VPK archive.
-        
+
         Args:
             extension: Filter files by extension (e.g., 'vtf', 'vmt'). Optional.
             path: Filter files by directory path. Optional.
-            
+
         Returns:
             List of file paths within the archive.
-            
+
         Example:
             >>> vpk.list_files(extension="vtf")  # All texture files
             >>> vpk.list_files(path="materials/models")  # Files in specific directory
@@ -240,14 +283,14 @@ class VPKFile:
 
     def find_files(self, pattern: str) -> List[str]:
         """Find files matching a pattern.
-        
+
         Args:
             pattern: Glob pattern to match against file paths.
                     Examples: "materials/*.vmt", "models/player/*"
-                    
+
         Returns:
             List of matching file paths.
-            
+
         Example:
             >>> vpk.find_files("materials/*.vmt")  # All material files
             >>> vpk.find_files("models/player/*")  # All player model files
@@ -260,13 +303,13 @@ class VPKFile:
 
     def find_file_path(self, filename: str) -> Optional[str]:
         """Find the full path of a file by its name.
-        
+
         Args:
             filename: Name of the file to search for (e.g., "example.vmt").
-            
+
         Returns:
             Full path within the VPK if found, None otherwise.
-            
+
         Example:
             >>> full_path = vpk.find_file_path("example.vmt")
             >>> # Returns something like "materials/models/example.vmt"
@@ -288,28 +331,23 @@ class VPKFile:
 
     def get_file_entry(self, filepath: str) -> Optional[Tuple[str, str, VPKDirectoryEntry]]:
         """Get detailed information about a file in the VPK.
-        
+
         Args:
             filepath: Path of the file within the VPK archive.
-            
+
         Returns:
             Tuple of (extension, directory, entry) if found, None otherwise.
             The entry contains size, offset, and other metadata.
-            
+
         Example:
             >>> entry_info = vpk.get_file_entry("materials/example.vmt")
             >>> if entry_info:
-            ...     ext, dir, entry = entry_info
+            ...     _ext, _dir, entry = entry_info
             ...     print(f"File size: {entry.entry_length} bytes")
         """
         self._ensure_parsed()
         try:
-            path = Path(filepath)
-            extension = path.suffix[1:]
-            filename = path.stem
-            directory = str(path.parent).replace('\\', '/')
-            if directory == '.':
-                directory = ' '
+            extension, directory, filename = _parse_vpk_path(filepath)
 
             if (extension in self.directory and
                     directory in self.directory[extension] and
@@ -321,14 +359,14 @@ class VPKFile:
 
     def extract_file(self, filepath: str, output_path: str) -> bool:
         """Extract a file from the VPK archive to disk.
-        
+
         Args:
             filepath: Path of the file within the VPK archive.
             output_path: Where to save the extracted file.
-            
+
         Returns:
             True if extraction succeeded, False otherwise.
-            
+
         Example:
             >>> success = vpk.extract_file("materials/example.vmt", "output.vmt")
             >>> if success:
@@ -357,19 +395,19 @@ class VPKFile:
 
     def patch_file(self, filepath: str, new_data: bytes, create_backup: bool = False) -> bool:
         """Replace a file's contents within the VPK archive.
-        
+
         Args:
             filepath: Path of the file within the VPK archive to replace.
             new_data: The new file contents as bytes.
             create_backup: Whether to create a backup of the original archive.
                           Backup will have .backup extension.
-                          
+
         Returns:
             True if patching succeeded, False otherwise.
-            
+
         Note:
             The new data must be exactly the same size as the original file.
-            
+
         Example:
             >>> with open("my_material.vmt", "rb") as f:
             ...     new_content = f.read()
@@ -408,7 +446,7 @@ class VPKFile:
     @classmethod
     def create(cls, source_dir: str, output_base_path: str, split_size: int = None) -> bool:
         """Create a new VPK archive from a directory.
-        
+
         Args:
             source_dir: Directory containing files to archive.
             output_base_path: Base path for the output VPK file(s).
@@ -416,23 +454,35 @@ class VPKFile:
                              For multi-file: "output" (will create output_dir.vpk, output_001.vpk, etc.)
             split_size: Maximum size per archive file in bytes. If None, creates a single file.
                        Example: 100*1024*1024 for 100MB splits.
-                       
+
         Returns:
             True if creation succeeded, False otherwise.
-            
+
         Example:
             >>> # Single file
             >>> VPKFile.create("my_mod", "my_mod.vpk")
-            >>> 
+            >>>
             >>> # Multi-file with 100MB splits
             >>> VPKFile.create("my_mod", "my_mod", split_size=100*1024*1024)
         """
         source_path = Path(source_dir)
         base_output_path = Path(output_base_path)
 
+        # pathlib.relative_to() is a little slow for this so im string slicing
         try:
             base_output_path.parent.mkdir(parents=True, exist_ok=True)
-            files = [(f, f.relative_to(source_path)) for f in source_path.rglob('*') if f.is_file()]
+            source_str = str(source_path.absolute())
+
+            if not source_str.endswith('/'):
+                source_str += '/'
+            source_len = len(source_str)
+
+            files = []
+            for f in source_path.rglob('*'):
+                if f.is_file():
+                    full_path_str = str(f.absolute())
+                    rel_path_str = full_path_str[source_len:]
+                    files.append((full_path_str, rel_path_str))
 
             if not files:
                 print("No files found in source directory")
@@ -445,7 +495,7 @@ class VPKFile:
                 output_path = f"{base_output_path}.vpk" if not str(base_output_path).endswith('.vpk') else str(base_output_path)
                 return cls._create_single_vpk(vpk_structure, output_path)
             else:
-                # for multi-file VPK use _dir.vpk naming convention
+                # for multi-file VPK use _dir.vpk naming
                 return cls._create_multi_vpk(vpk_structure, base_output_path, split_size)
         except Exception as e:
             print(f"Error creating VPK: {e}")
@@ -455,10 +505,8 @@ class VPKFile:
     @staticmethod
     def _build_vpk_structure(files):
         vpk_structure = {}
-        for file_path, rel_path in files:
-            extension = rel_path.suffix[1:] if rel_path.suffix else ' '
-            path = str(rel_path.parent).replace('\\', '/') if str(rel_path.parent) != '.' else ' '
-            filename = rel_path.stem
+        for file_path, rel_path_str in files:
+            extension, path, filename = _parse_vpk_path(rel_path_str)
 
             if extension not in vpk_structure:
                 vpk_structure[extension] = {}
@@ -471,21 +519,16 @@ class VPKFile:
             vpk_structure[extension][path][filename] = {
                 'content': content,
                 'size': len(content),
-                'path': str(file_path)
+                'path': file_path
             }
         return vpk_structure
 
     @staticmethod
     def _write_vpk_header(f, tree_size=0, embed_chunk_length=0):
-        f.write(struct.pack('<I', 0x55AA1234))
-        f.write(struct.pack('<I', 2))
-        tree_size_pos = f.tell()
-        f.write(struct.pack('<I', tree_size))
-        embed_chunk_length_pos = f.tell()
-        f.write(struct.pack('<I', embed_chunk_length))
-        f.write(struct.pack('<I', 0))
-        f.write(struct.pack('<I', 48))
-        f.write(struct.pack('<I', 0))
+        tree_size_pos = 8
+        embed_chunk_length_pos = 12
+        header = struct.pack('<7I', 0x55AA1234, 2, tree_size, embed_chunk_length, 0, 48, 0)
+        f.write(header)
         return tree_size_pos, embed_chunk_length_pos
 
     @staticmethod
@@ -505,26 +548,14 @@ class VPKFile:
                     f.write(filename.encode('ascii') + b'\0')
 
                     if archive_entries and vpk_structure is None:
-                        # multi-file VPK case
                         entry = archive_entries[extension][path][filename]
-                        f.write(struct.pack('<I', entry['crc']))
-                        f.write(struct.pack('<H', 0))
-                        f.write(struct.pack('<H', entry['archive_idx']))
-                        f.write(struct.pack('<I', entry['offset']))
-                        f.write(struct.pack('<I', entry['size']))
+                        f.write(struct.pack('<IHHII', entry['crc'], 0, entry['archive_idx'], entry['offset'], entry['size']))
                     else:
-                        # single-file VPK case
                         file_info = vpk_structure[extension][path][filename]
                         content = file_info['content']
                         crc = zlib.crc32(content) & 0xFFFFFFFF
-
-                        f.write(struct.pack('<I', crc))
-                        f.write(struct.pack('<H', 0))
-                        f.write(struct.pack('<H', 0x7FFF))
-
-                        entry_positions.append((f.tell(), archive_offset, len(content)))
-                        f.write(struct.pack('<I', 0))
-                        f.write(struct.pack('<I', len(content)))
+                        entry_positions.append((f.tell() + 8, archive_offset, len(content)))
+                        f.write(struct.pack('<IHHII', crc, 0, 0x7FFF, 0, len(content)))
                         archive_offset += len(content)
 
                     f.write(struct.pack('<H', 0xFFFF))
@@ -597,64 +628,52 @@ class VPKFile:
     @staticmethod
     def _create_multi_vpk(vpk_structure, base_output_path, split_size):
         try:
-            archives = {}
-            current_archive = 0
-            current_size = 0
-
-            # distribute files across archives
-            for extension in sorted(vpk_structure.keys()):
-                for path in sorted(vpk_structure[extension].keys()):
-                    for filename in sorted(vpk_structure[extension][path].keys()):
-                        file_info = vpk_structure[extension][path][filename]
-                        size = file_info['size']
-
-                        if current_size + size > split_size and current_size > 0:
-                            current_archive += 1
-                            current_size = 0
-
-                        if current_archive not in archives:
-                            archives[current_archive] = []
-
-                        archives[current_archive].append({
-                            'extension': extension,
-                            'path': path,
-                            'filename': filename,
-                            'content': file_info['content'],
-                            'size': size
-                        })
-                        current_size += size
-
-            # create archive files and build entries
             archive_entries = {}
-            for archive_idx, files in archives.items():
-                archive_path = f"{base_output_path}_{archive_idx:03d}.vpk"
+            current_archive_idx = 0
+            current_size = 0
+            current_archive_file = None
+            current_archive_pos = 0
 
-                with open(archive_path, 'wb') as archive_f:
-                    current_pos = 0
+            try:
+                for extension in sorted(vpk_structure.keys()):
+                    for path in sorted(vpk_structure[extension].keys()):
+                        for filename in sorted(vpk_structure[extension][path].keys()):
+                            file_info = vpk_structure[extension][path][filename]
+                            content = file_info['content']
+                            size = file_info['size']
 
-                    for file_entry in files:
-                        extension = file_entry['extension']
-                        path = file_entry['path']
-                        filename = file_entry['filename']
-                        content = file_entry['content']
-                        size = file_entry['size']
+                            if current_size + size > split_size and current_size > 0:
+                                if current_archive_file:
+                                    current_archive_file.close()
+                                current_archive_idx += 1
+                                current_size = 0
+                                current_archive_file = None
 
-                        crc = zlib.crc32(content) & 0xFFFFFFFF
+                            if current_archive_file is None:
+                                archive_path = f"{base_output_path}_{current_archive_idx:03d}.vpk"
+                                current_archive_file = open(archive_path, 'wb')
+                                current_archive_pos = 0
 
-                        if extension not in archive_entries:
-                            archive_entries[extension] = {}
-                        if path not in archive_entries[extension]:
-                            archive_entries[extension][path] = {}
+                            crc = zlib.crc32(content) & 0xFFFFFFFF
 
-                        archive_entries[extension][path][filename] = {
-                            'archive_idx': archive_idx,
-                            'offset': current_pos,
-                            'size': size,
-                            'crc': crc
-                        }
+                            if extension not in archive_entries:
+                                archive_entries[extension] = {}
+                            if path not in archive_entries[extension]:
+                                archive_entries[extension][path] = {}
 
-                        archive_f.write(content)
-                        current_pos += size
+                            archive_entries[extension][path][filename] = {
+                                'archive_idx': current_archive_idx,
+                                'offset': current_archive_pos,
+                                'size': size,
+                                'crc': crc
+                            }
+
+                            current_archive_file.write(content)
+                            current_archive_pos += size
+                            current_size += size
+            finally:
+                if current_archive_file:
+                    current_archive_file.close()
 
             # create directory file
             dir_path = f"{base_output_path}_dir.vpk"
@@ -678,57 +697,97 @@ class VPKFile:
             return False
 
     def _ensure_parsed(self) -> None:
-        # Ensure the VPK directory has been parsed.
         if not self._parsed:
             self.parse_directory()
 
-    def extract_all(self, output_dir: str, pattern: Optional[str] = None) -> int:
+    def extract_all(self, output_dir: str, pattern: Optional[str] = None) -> int | None:
         """Extract multiple files to a directory.
-        
+
         Args:
             output_dir: Directory to extract files to.
             pattern: Optional glob pattern to filter files (e.g., "materials/*.vmt").
                     If None, extracts all files.
-                    
+
         Returns:
             Number of files successfully extracted.
-            
+
         Example:
             >>> count = vpk.extract_all("extracted_files")
             >>> print(f"Extracted {count} files")
-            >>> 
+            >>>
             >>> # extract only material files
             >>> count = vpk.extract_all("materials", "materials/*.vmt")
         """
         self._ensure_parsed()
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        
-        files = self.find_files(pattern) if pattern else self.list_files()
+
         extracted = 0
-        
-        for filepath in files:
-            try:
-                # create subdirectories as needed
-                full_output_path = output_path / filepath
-                full_output_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                if self.extract_file(filepath, str(full_output_path)):
+        created_dirs = set()
+        output_dir_str = str(output_path)
+
+        files_to_extract = []
+        if pattern:
+            matching_files = set(self.find_files(pattern))
+            for extension in self.directory:
+                for directory in self.directory[extension]:
+                    for filename, entry in self.directory[extension][directory].items():
+                        filepath = f"{directory}/{filename}.{extension}" if directory != " " else f"{filename}.{extension}"
+                        if filepath in matching_files:
+                            files_to_extract.append((extension, directory, filename, entry))
+        else:
+            for extension in self.directory:
+                for directory in self.directory[extension]:
+                    for filename, entry in self.directory[extension][directory].items():
+                        files_to_extract.append((extension, directory, filename, entry))
+
+        files_to_extract.sort(key=lambda x: (x[3].archive_index, x[3].entry_offset))
+
+        open_archives = {}
+        try:
+            for extension, directory, filename, entry in files_to_extract:
+                try:
+                    if directory != " ":
+                        parent_dir = output_dir_str + '/' + directory
+                        if parent_dir not in created_dirs:
+                            Path(parent_dir).mkdir(parents=True, exist_ok=True)
+                            created_dirs.add(parent_dir)
+                        full_output_path = parent_dir + '/' + filename + '.' + extension
+                    else:
+                        full_output_path = output_dir_str + '/' + filename + '.' + extension
+
+                    archive_path = self.get_archive_path(entry.archive_index)
+                    if archive_path not in open_archives:
+                        open_archives[archive_path] = open(archive_path, 'rb')
+
+                    archive_file = open_archives[archive_path]
+                    adjusted_offset = entry.entry_offset + (self.header_and_tree_offset if not self.is_dir_vpk else 0)
+                    archive_file.seek(adjusted_offset)
+                    file_data = archive_file.read(entry.entry_length)
+
+                    with open(full_output_path, 'wb') as f:
+                        if entry.preload_bytes > 0 and entry.preload_data:
+                            f.write(entry.preload_data)
+                        f.write(file_data)
+
                     extracted += 1
-            except Exception as e:
-                print(f"Failed to extract {filepath}: {e}")
-                
+                except Exception as e:
+                    print(f"Failed to extract file: {e}")
+        finally:
+            for archive_file in open_archives.values():
+                archive_file.close()
+
         return extracted
 
     def get_file_data(self, filepath: str) -> Optional[bytes]:
         """Read a file's contents directly into memory.
-        
+
         Args:
             filepath: Path of the file within the VPK archive.
-            
+
         Returns:
             File contents as bytes, or None if file not found.
-            
+
         Example:
             >>> data = vpk.get_file_data("materials/example.vmt")
             >>> if data:
@@ -751,7 +810,7 @@ class VPKFile:
             if entry.preload_bytes > 0 and entry.preload_data:
                 result.extend(entry.preload_data)
             result.extend(file_data)
-            
+
             return bytes(result)
         except Exception as e:
             print(f"Error reading file data: {e}")
@@ -759,13 +818,13 @@ class VPKFile:
 
     def file_exists(self, filepath: str) -> bool:
         """Check if a file exists in the VPK archive.
-        
+
         Args:
             filepath: Path of the file within the VPK archive.
-            
+
         Returns:
             True if the file exists, False otherwise.
-            
+
         Example:
             >>> if vpk.file_exists("materials/example.vmt"):
             ...     print("File found!")
@@ -773,16 +832,16 @@ class VPKFile:
         self._ensure_parsed()
         return self.get_file_entry(filepath) is not None
 
-    def get_file_info(self, filepath: str) -> Optional[Dict[str, any]]:
+    def get_file_info(self, filepath: str) -> Optional[Dict[str, Any]]:
         """Get comprehensive information about a file.
-        
+
         Args:
             filepath: Path of the file within the VPK archive.
-            
+
         Returns:
             Dictionary with file information or None if not found.
             Contains: 'size', 'crc', 'archive_index', 'offset', 'preload_bytes'
-            
+
         Example:
             >>> info = vpk.get_file_info("materials/example.vmt")
             >>> if info:
@@ -793,7 +852,7 @@ class VPKFile:
         entry_info = self.get_file_entry(filepath)
         if not entry_info:
             return None
-            
+
         extension, directory, entry = entry_info
         return {
             'size': entry.entry_length,
