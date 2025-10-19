@@ -49,6 +49,10 @@ print(f"Found {len(files)} files")
 texture_files = vpk.list_files(extension="vtf")
 material_files = vpk.find_files("materials/*.vmt")
 
+# Extract all files matching a pattern
+count = vpk.extract_all("output_dir", pattern="materials/*.vmt")
+print(f"Extracted {count} material files")
+
 # Extract a file
 vpk.extract_file("materials/models/player/scout.vmt", "output/scout.vmt")
 
@@ -87,10 +91,6 @@ if vpk.file_exists(target_file):
     
         # Now patch the file
         vpk.patch_file(target_file, new_texture_data, create_backup=False)
-
-# Extract all files matching a pattern
-count = vpk.extract_all("output_dir", pattern="materials/*.vmt")
-print(f"Extracted {count} material files")
 ```
 
 ### PCF Files
