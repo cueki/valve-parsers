@@ -237,6 +237,10 @@ https://developer.valvesoftware.com/wiki/VPK_(file_format)
 This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.0.7
+- Performance: Replaced rglob with os.walk for VPK creation
+- Performance: Replaced Path.match with fnmatch in find_files()
+- Bug fix: find_files() now uses correct glob matching behavior
 ### 1.0.6
 - Updated README with corrected examples
 - Added documentation for all VPK methods: extract_all(), get_file_data(), file_exists(), get_file_info()
