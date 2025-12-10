@@ -27,7 +27,7 @@ class PCFElement:
 
 @dataclass
 class PCFFile:
-    """Parser for Valve's PCF (Particle Cache File) format.
+    """Parser for Valve's PCF format.
     
     PCF files define particle systems used in Source engine games.
     They contain particle effects like smoke, fire, explosions, etc.
