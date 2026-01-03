@@ -54,8 +54,11 @@ class VPKDirectoryEntry:
 
 
 def _parse_vpk_path(filepath: str) -> Tuple[str, str, str]:
-    """Parse a file path into VPK components (extension, directory, filename)."""
-    filepath = filepath.replace('\\', '/')
+    """Parse a file path into VPK components (extension, directory, filename).
+
+    Also normalizes paths to lowercase as Source engine VPK files use lowercase filenames.
+    """
+    filepath = filepath.replace('\\', '/').lower()
 
     last_slash = filepath.rfind('/')
     if last_slash >= 0:
@@ -135,7 +138,7 @@ class VPKFile:
         >>> vpk.parse_directory()
     """
     def __init__(self, vpk_path: Union[str, Path], auto_parse: bool = True):
-        self.vpk_path = vpk_path
+        self.vpk_path = str(vpk_path)
         self.directory: Dict[str, Dict[str, Dict[str, VPKDirectoryEntry]]] = {}
         self._setup_paths()
         self.header_and_tree_offset = 0
@@ -338,18 +341,19 @@ class VPKFile:
             print(f"Error getting file entry: {e}")
         return None
 
-    def extract_file(self, filepath: str, output_path: str) -> bool:
+    def extract_file(self, filepath: str, output_path: Union[str, Path]) -> bool:
         """Extract a file from the VPK archive to disk.
 
         Args:
             filepath: Path of the file within the VPK archive.
-            output_path: Where to save the extracted file.
+            output_path: Where to save the extracted file (str or Path).
 
         Returns:
             True if extraction succeeded, False otherwise.
 
         Example:
             >>> success = vpk.extract_file("materials/example.vmt", "output.vmt")
+            >>> success = vpk.extract_file("materials/example.vmt", Path("output.vmt"))
             >>> if success:
             ...     print("File extracted successfully")
         """
@@ -425,12 +429,12 @@ class VPKFile:
             return False
 
     @classmethod
-    def create(cls, source_dir: str, output_base_path: str, split_size: int = None) -> bool:
+    def create(cls, source_dir: Union[str, Path], output_base_path: Union[str, Path], split_size: int = None) -> bool:
         """Create a new VPK archive from a directory.
 
         Args:
-            source_dir: Directory containing files to archive.
-            output_base_path: Base path for the output VPK file(s).
+            source_dir: Directory containing files to archive (str or Path).
+            output_base_path: Base path for the output VPK file(s) (str or Path).
                              For single files: "output.vpk" or "output"
                              For multi-file: "output" (will create output_dir.vpk, output_001.vpk, etc.)
             split_size: Maximum size per archive file in bytes. If None, creates a single file.
@@ -442,6 +446,7 @@ class VPKFile:
         Example:
             >>> # Single file
             >>> VPKFile.create("my_mod", "my_mod.vpk")
+            >>> VPKFile.create(Path("my_mod"), Path("my_mod.vpk"))
             >>>
             >>> # Multi-file with 100MB splits
             >>> VPKFile.create("my_mod", "my_mod", split_size=100*1024*1024)
@@ -688,11 +693,11 @@ class VPKFile:
         if not self._parsed:
             self.parse_directory()
 
-    def extract_all(self, output_dir: str, pattern: Optional[str] = None) -> int | None:
+    def extract_all(self, output_dir: Union[str, Path], pattern: Optional[str] = None) -> int | None:
         """Extract multiple files to a directory.
 
         Args:
-            output_dir: Directory to extract files to.
+            output_dir: Directory to extract files to (str or Path).
             pattern: Optional glob pattern to filter files (e.g., "materials/*.vmt").
                     If None, extracts all files.
 
@@ -701,6 +706,7 @@ class VPKFile:
 
         Example:
             >>> count = vpk.extract_all("extracted_files")
+            >>> count = vpk.extract_all(Path("extracted_files"))
             >>> print(f"Extracted {count} files")
             >>>
             >>> # extract only material files
