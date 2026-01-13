@@ -50,7 +50,7 @@ class PCFFile:
         self.input_file = Path(input_file)
 
     @staticmethod
-    def read_null_terminated_string(file: BinaryIO):
+    def _read_null_terminated_string(file: BinaryIO):
         """Read a null-terminated string from a binary file.
         
         Args:
@@ -68,7 +68,7 @@ class PCFFile:
         return bytes(chars)
 
     @staticmethod
-    def write_null_terminated_string(file: BinaryIO, string: Union[str, bytes]):
+    def _write_null_terminated_string(file: BinaryIO, string: Union[str, bytes]):
         """Write a null-terminated string to a binary file.
         
         Args:
@@ -81,7 +81,7 @@ class PCFFile:
             encoded = string
         file.write(encoded + b'\x00')
 
-    def write_attribute_data(self, file: BinaryIO, attr_type: AttributeType, value: Any) -> None:
+    def _write_attribute_data(self, file: BinaryIO, attr_type: AttributeType, value: Any) -> None:
         """Write attribute data to file in the correct format.
         
         Args:
@@ -99,7 +99,7 @@ class PCFFile:
             if isinstance(value, str):
                 value = value.encode('ascii', errors='replace')
 
-            self.write_null_terminated_string(file, value)
+            self._write_null_terminated_string(file, value)
             return
 
         if attr_type == AttributeType.MATRIX:
@@ -111,7 +111,7 @@ class PCFFile:
             file.write(struct.pack(ATTRIBUTE_VALUES.get(attr_type), len(value)))
             base_type = AttributeType(attr_type.value - 14)
             for item in value:
-                self.write_attribute_data(file, base_type, item)
+                self._write_attribute_data(file, base_type, item)
             return
 
         if attr_type in [AttributeType.COLOR, AttributeType.VECTOR2, AttributeType.VECTOR3, AttributeType.VECTOR4]:
@@ -120,7 +120,7 @@ class PCFFile:
 
         file.write(struct.pack(ATTRIBUTE_VALUES.get(attr_type), value))
 
-    def read_attribute_data(self, file: BinaryIO, attr_type: AttributeType):
+    def _read_attribute_data(self, file: BinaryIO, attr_type: AttributeType):
         """Read attribute data from file based on type.
         
         Args:
@@ -140,7 +140,7 @@ class PCFFile:
             return bool(file.read(1)[0])
 
         if attr_type == AttributeType.STRING:
-            return self.read_null_terminated_string(file)
+            return self._read_null_terminated_string(file)
 
         if attr_type == AttributeType.BINARY:
             length = struct.unpack(ATTRIBUTE_VALUES.get(attr_type), file.read(4))[0]
@@ -164,7 +164,7 @@ class PCFFile:
         if attr_type.value >= AttributeType.ELEMENT_ARRAY.value:
             count = struct.unpack('<I', file.read(4))[0]
             base_type = AttributeType(attr_type.value - 14)
-            return [self.read_attribute_data(file, base_type) for _ in range(count)]
+            return [self._read_attribute_data(file, base_type) for _ in range(count)]
 
         raise ValueError(f"Unsupported attribute type: {attr_type}")
 
@@ -186,7 +186,7 @@ class PCFFile:
         with open(output_path, 'wb') as file:
             # write header
             version_string = getattr(PCFVersion, self.version)
-            self.write_null_terminated_string(file, f"{version_string}\n")
+            self._write_null_terminated_string(file, f"{version_string}\n")
 
             # write string dictionary
             file.write(struct.pack('<H', len(self.string_dictionary)))
@@ -209,7 +209,7 @@ class PCFFile:
                     name_index = self.string_dictionary.index(attr_name)
                     file.write(struct.pack('<H', name_index))
                     file.write(struct.pack('B', attr_type))
-                    self.write_attribute_data(file, attr_type, attr_value)
+                    self._write_attribute_data(file, attr_type, attr_value)
 
         return self
 
@@ -230,7 +230,7 @@ class PCFFile:
         """
         with open(self.input_file, 'rb') as file:
             # read header
-            header = self.read_null_terminated_string(file)
+            header = self._read_null_terminated_string(file)
             header_str = header.decode('ascii', errors='replace')
 
             for ver_attr in dir(PCFVersion):
@@ -247,14 +247,14 @@ class PCFFile:
 
             # store strings as bytes
             for _ in range(count):
-                string = self.read_null_terminated_string(file)
+                string = self._read_null_terminated_string(file)
                 self.string_dictionary.append(string)
 
             # read element dictionary
             element_count = struct.unpack('<I', file.read(4))[0]
             for _ in range(element_count):
                 type_name_index = struct.unpack('<H', file.read(2))[0]
-                element_name = self.read_null_terminated_string(file)
+                element_name = self._read_null_terminated_string(file)
                 data_signature = file.read(16)
 
                 element = PCFElement(
@@ -273,7 +273,7 @@ class PCFFile:
                     attr_type = AttributeType(file.read(1)[0])
 
                     attr_name = self.string_dictionary[type_name_index]
-                    attr_value = self.read_attribute_data(file, attr_type)
+                    attr_value = self._read_attribute_data(file, attr_type)
                     element.attributes[attr_name] = (attr_type, attr_value)
 
         return self

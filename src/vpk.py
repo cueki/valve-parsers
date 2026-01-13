@@ -141,9 +141,9 @@ class VPKFile:
         self.vpk_path = str(vpk_path)
         self.directory: Dict[str, Dict[str, Dict[str, VPKDirectoryEntry]]] = {}
         self._setup_paths()
-        self.header_and_tree_offset = 0
+        self._header_and_tree_offset = 0
         self._parsed = False
-        if not self.is_dir_vpk:
+        if not self._is_dir_vpk:
             self._calculate_header_and_tree_offset()
         if auto_parse:
             self.parse_directory()
@@ -151,9 +151,9 @@ class VPKFile:
     def _setup_paths(self):
         """Set up paths for VPK file(s) - determines if single or multi-file archive."""
         if self.vpk_path.endswith('_dir.vpk'):
-            self.is_dir_vpk = True
-            self.dir_path = self.vpk_path
-            self.base_path = self.vpk_path[:-8]
+            self._is_dir_vpk = True
+            self._dir_path = self.vpk_path
+            self._base_path = self.vpk_path[:-8]
         else:
             path_without_ext = str(Path(self.vpk_path).with_suffix(''))
             if path_without_ext[-3:].isdigit() and path_without_ext[-4] == '_':
@@ -162,13 +162,13 @@ class VPKFile:
             possible_dir_path = f"{path_without_ext}_dir.vpk"
 
             if Path(possible_dir_path).exists():
-                self.is_dir_vpk = True
-                self.dir_path = possible_dir_path
-                self.base_path = path_without_ext
+                self._is_dir_vpk = True
+                self._dir_path = possible_dir_path
+                self._base_path = path_without_ext
             else:
-                self.is_dir_vpk = False
-                self.dir_path = self.vpk_path
-                self.base_path = str(Path(self.vpk_path).with_suffix(''))
+                self._is_dir_vpk = False
+                self._dir_path = self.vpk_path
+                self._base_path = str(Path(self.vpk_path).with_suffix(''))
 
     def parse_directory(self) -> 'VPKFile':
         """Parse the VPK directory structure to enable file operations.
@@ -182,7 +182,7 @@ class VPKFile:
             IOError: If the VPK file cannot be read.
             ValueError: If the VPK format is invalid.
         """
-        with open(self.dir_path, 'rb') as f:
+        with open(self._dir_path, 'rb') as f:
             tree_offset = struct.calcsize('<7I')
             f.seek(tree_offset)
 
@@ -215,31 +215,31 @@ class VPKFile:
     def _calculate_header_and_tree_offset(self) -> int:
         """Calculate offset for single-file VPK archives."""
         try:
-            with open(self.dir_path, 'rb') as f:
+            with open(self._dir_path, 'rb') as f:
                 header = f.read(28)
                 if len(header) != 28:
                     raise ValueError(f"Invalid VPK header: expected 28 bytes, got {len(header)}")
 
                 tree_size = struct.unpack('<I', header[8:12])[0]
-                self.header_and_tree_offset = 28 + tree_size
-                return self.header_and_tree_offset
+                self._header_and_tree_offset = 28 + tree_size
+                return self._header_and_tree_offset
         except Exception as e:
             print(f"Error calculating header offset: {e}")
             return 0
 
-    def get_archive_path(self, archive_index: int) -> str:
-        if not self.is_dir_vpk:
+    def _get_archive_path(self, archive_index: int) -> str:
+        if not self._is_dir_vpk:
             return self.vpk_path
 
         if archive_index == 0x7fff:
-            return self.dir_path
-        return f"{self.base_path}_{archive_index:03d}.vpk"
+            return self._dir_path
+        return f"{self._base_path}_{archive_index:03d}.vpk"
 
-    def read_from_archive(self, archive_index: int, offset: int, size: int) -> Optional[bytes]:
-        archive_path = self.get_archive_path(archive_index)
+    def _read_from_archive(self, archive_index: int, offset: int, size: int) -> Optional[bytes]:
+        archive_path = self._get_archive_path(archive_index)
         try:
             with open(archive_path, 'rb') as f:
-                adjusted_offset = offset + (self.header_and_tree_offset if not self.is_dir_vpk else 0)
+                adjusted_offset = offset + (self._header_and_tree_offset if not self._is_dir_vpk else 0)
                 f.seek(adjusted_offset)
                 return f.read(size)
         except (IOError, OSError) as e:
@@ -364,7 +364,7 @@ class VPKFile:
         extension, directory, entry = entry_info
 
         try:
-            file_data = self.read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
+            file_data = self._read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
             if not file_data:
                 return False
 
@@ -411,7 +411,7 @@ class VPKFile:
                     f"({len(new_data)} != {entry.entry_length} bytes)"
                 )
 
-            archive_path = self.get_archive_path(entry.archive_index)
+            archive_path = self._get_archive_path(entry.archive_index)
 
             if create_backup:
                 backup_path = f"{archive_path}.backup"
@@ -750,12 +750,12 @@ class VPKFile:
                     else:
                         full_output_path = output_dir_str + '/' + filename + '.' + extension
 
-                    archive_path = self.get_archive_path(entry.archive_index)
+                    archive_path = self._get_archive_path(entry.archive_index)
                     if archive_path not in open_archives:
                         open_archives[archive_path] = open(archive_path, 'rb')
 
                     archive_file = open_archives[archive_path]
-                    adjusted_offset = entry.entry_offset + (self.header_and_tree_offset if not self.is_dir_vpk else 0)
+                    adjusted_offset = entry.entry_offset + (self._header_and_tree_offset if not self._is_dir_vpk else 0)
                     archive_file.seek(adjusted_offset)
                     file_data = archive_file.read(entry.entry_length)
 
@@ -795,7 +795,7 @@ class VPKFile:
         extension, directory, entry = entry_info
 
         try:
-            file_data = self.read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
+            file_data = self._read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
             if not file_data:
                 return None
 
