@@ -454,7 +454,7 @@ class VPKFile:
         source_path = Path(source_dir)
         base_output_path = Path(output_base_path)
 
-        # use os.walk for better performance (18x faster than rglob)
+        # use os.walk for better performance
         try:
             base_output_path.parent.mkdir(parents=True, exist_ok=True)
             source_str = str(source_path.absolute())
