@@ -14,10 +14,10 @@ from .pcf import PCFFile, PCFElement
 from .constants import PCFVersion, AttributeType
 
 __all__ = [
-    "VPKFile", 
+    "VPKFile",
     "VPKDirectoryEntry",
-    "PCFFile", 
+    "PCFFile",
     "PCFElement",
     "PCFVersion",
-    "AttributeType"
+    "AttributeType",
 ]

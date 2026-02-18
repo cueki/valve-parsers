@@ -10,6 +10,7 @@ from typing import Dict, Optional, BinaryIO, List, Tuple, Union, Any
 
 # see: https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
+
 @dataclass
 class VPKDirectoryEntry:
     """Metadata for a file entry within a VPK archive.
@@ -24,6 +25,7 @@ class VPKDirectoryEntry:
         entry_length: Size of the file data in bytes.
         preload_data: Inline data stored in the directory (if any).
     """
+
     crc: int
     preload_bytes: int
     archive_index: int
@@ -32,21 +34,21 @@ class VPKDirectoryEntry:
     preload_data: Optional[bytes] = None
 
     @classmethod
-    def from_file(cls, file: BinaryIO) -> 'VPKDirectoryEntry':
-        data = struct.unpack('<IHHII', file.read(16))
+    def from_file(cls, file: BinaryIO) -> "VPKDirectoryEntry":
+        data = struct.unpack("<IHHII", file.read(16))
 
         entry = cls(
             crc=data[0],
             preload_bytes=data[1],
             archive_index=data[2],
             entry_offset=data[3],
-            entry_length=data[4]
+            entry_length=data[4],
         )
 
         if entry.preload_bytes > 0:
             entry.preload_data = file.read(entry.preload_bytes)
 
-        terminator = struct.unpack('<H', file.read(2))[0]
+        terminator = struct.unpack("<H", file.read(2))[0]
         if terminator != 0xFFFF:
             print(f"VPK WARNING: Expected 0xFFFF terminator, got 0x{terminator:04X}")
 
@@ -58,62 +60,54 @@ def _parse_vpk_path(filepath: str) -> Tuple[str, str, str]:
 
     Also normalizes paths to lowercase as Source engine VPK files use lowercase filenames.
     """
-    filepath = filepath.replace('\\', '/').lower()
+    filepath = filepath.replace("\\", "/").lower()
 
-    last_slash = filepath.rfind('/')
+    last_slash = filepath.rfind("/")
     if last_slash >= 0:
         directory = filepath[:last_slash]
-        filename_ext = filepath[last_slash + 1:]
+        filename_ext = filepath[last_slash + 1 :]
     else:
-        directory = ' '
+        directory = " "
         filename_ext = filepath
 
-    last_dot = filename_ext.rfind('.')
+    last_dot = filename_ext.rfind(".")
     if last_dot > 0:
         filename = filename_ext[:last_dot]
-        extension = filename_ext[last_dot + 1:]
+        extension = filename_ext[last_dot + 1 :]
     else:
         filename = filename_ext
-        extension = ' '
+        extension = " "
 
     return extension, directory, filename
 
 
+_NON_PRINTABLE = bytes(b for b in range(256) if not (32 <= b <= 126))
+
+
 def _read_null_string(file: BinaryIO) -> str:
     """Read a null-terminated ASCII string from a binary file."""
-    chunk_size = 256
-    buffer = bytearray()
-    bad_result = bytearray()
-    had_data = False
+    chunks = []
 
     while True:
-        chunk = file.read(chunk_size)
+        chunk = file.read(256)
         if not chunk:
             break
 
-        null_pos = chunk.find(b'\x00')
+        null_pos = chunk.find(b"\x00")
         if null_pos != -1:
-            had_data = had_data or (null_pos > 0)
-            for i in range(null_pos):
-                byte = chunk[i]
-                if 32 <= byte <= 126:
-                    buffer.append(byte)
-                else:
-                    bad_result.append(byte)
+            chunks.append(chunk[:null_pos])
             file.seek(-(len(chunk) - null_pos - 1), 1)
             break
-        else:
-            had_data = True
-            for byte in chunk:
-                if 32 <= byte <= 126:
-                    buffer.append(byte)
-                else:
-                    bad_result.append(byte)
+        chunks.append(chunk)
 
-    if had_data and not buffer:
-        print(f"[VPK] All chars filtered, bad_result: {bad_result.hex()}")
+    raw = b"".join(chunks)
+    result = raw.translate(None, _NON_PRINTABLE)
 
-    return buffer.decode("ascii")
+    if raw and not result:
+        bad = raw.translate(None, bytes(range(32, 127)))
+        print(f"[VPK] All chars filtered, bad_result: {bad.hex()}")
+
+    return result.decode("ascii")
 
 
 class VPKFile:
@@ -137,12 +131,14 @@ class VPKFile:
         >>> vpk = VPKFile("pak01_dir.vpk", auto_parse=False)
         >>> vpk.parse_directory()
     """
+
     def __init__(self, vpk_path: Union[str, Path], auto_parse: bool = True):
         self.vpk_path = str(vpk_path)
         self.directory: Dict[str, Dict[str, Dict[str, VPKDirectoryEntry]]] = {}
         self._setup_paths()
         self._header_and_tree_offset = 0
         self._parsed = False
+        self._open_archives: Dict[str, BinaryIO] = {}
         if not self._is_dir_vpk:
             self._calculate_header_and_tree_offset()
         if auto_parse:
@@ -150,13 +146,13 @@ class VPKFile:
 
     def _setup_paths(self):
         """Set up paths for VPK file(s) - determines if single or multi-file archive."""
-        if self.vpk_path.endswith('_dir.vpk'):
+        if self.vpk_path.endswith("_dir.vpk"):
             self._is_dir_vpk = True
             self._dir_path = self.vpk_path
             self._base_path = self.vpk_path[:-8]
         else:
-            path_without_ext = str(Path(self.vpk_path).with_suffix(''))
-            if path_without_ext[-3:].isdigit() and path_without_ext[-4] == '_':
+            path_without_ext = str(Path(self.vpk_path).with_suffix(""))
+            if path_without_ext[-3:].isdigit() and path_without_ext[-4] == "_":
                 path_without_ext = path_without_ext[:-4]
 
             possible_dir_path = f"{path_without_ext}_dir.vpk"
@@ -168,9 +164,9 @@ class VPKFile:
             else:
                 self._is_dir_vpk = False
                 self._dir_path = self.vpk_path
-                self._base_path = str(Path(self.vpk_path).with_suffix(''))
+                self._base_path = str(Path(self.vpk_path).with_suffix(""))
 
-    def parse_directory(self) -> 'VPKFile':
+    def parse_directory(self) -> "VPKFile":
         """Parse the VPK directory structure to enable file operations.
 
         Must be called before using file listing, extraction, or patching methods.
@@ -182,8 +178,8 @@ class VPKFile:
             IOError: If the VPK file cannot be read.
             ValueError: If the VPK format is invalid.
         """
-        with open(self._dir_path, 'rb') as f:
-            tree_offset = struct.calcsize('<7I')
+        with open(self._dir_path, "rb") as f:
+            tree_offset = struct.calcsize("<7I")
             f.seek(tree_offset)
 
             while True:
@@ -215,12 +211,14 @@ class VPKFile:
     def _calculate_header_and_tree_offset(self) -> int:
         """Calculate offset for single-file VPK archives."""
         try:
-            with open(self._dir_path, 'rb') as f:
+            with open(self._dir_path, "rb") as f:
                 header = f.read(28)
                 if len(header) != 28:
-                    raise ValueError(f"Invalid VPK header: expected 28 bytes, got {len(header)}")
+                    raise ValueError(
+                        f"Invalid VPK header: expected 28 bytes, got {len(header)}"
+                    )
 
-                tree_size = struct.unpack('<I', header[8:12])[0]
+                tree_size = struct.unpack("<I", header[8:12])[0]
                 self._header_and_tree_offset = 28 + tree_size
                 return self._header_and_tree_offset
         except Exception as e:
@@ -231,22 +229,39 @@ class VPKFile:
         if not self._is_dir_vpk:
             return self.vpk_path
 
-        if archive_index == 0x7fff:
+        if archive_index == 0x7FFF:
             return self._dir_path
         return f"{self._base_path}_{archive_index:03d}.vpk"
 
-    def _read_from_archive(self, archive_index: int, offset: int, size: int) -> Optional[bytes]:
+    def close(self):
+        """Close all cached archive file handles."""
+        for f in self._open_archives.values():
+            f.close()
+        self._open_archives.clear()
+
+    def __del__(self):
+        self.close()
+
+    def _read_from_archive(
+        self, archive_index: int, offset: int, size: int
+    ) -> Optional[bytes]:
         archive_path = self._get_archive_path(archive_index)
         try:
-            with open(archive_path, 'rb') as f:
-                adjusted_offset = offset + (self._header_and_tree_offset if not self._is_dir_vpk else 0)
-                f.seek(adjusted_offset)
-                return f.read(size)
+            if archive_path not in self._open_archives:
+                self._open_archives[archive_path] = open(archive_path, "rb")
+            f = self._open_archives[archive_path]
+            adjusted_offset = offset + (
+                self._header_and_tree_offset if not self._is_dir_vpk else 0
+            )
+            f.seek(adjusted_offset)
+            return f.read(size)
         except (IOError, OSError) as e:
             print(f"Error reading from archive {archive_path}: {e}")
             return None
 
-    def list_files(self, extension: Optional[str] = None, path: Optional[str] = None) -> List[str]:
+    def list_files(
+        self, extension: Optional[str] = None, path: Optional[str] = None
+    ) -> List[str]:
         """List all files in the VPK archive.
 
         Args:
@@ -274,7 +289,9 @@ class VPKFile:
                     continue
 
                 for filename in self.directory[ext][p]:
-                    full_path = f"{p}/{filename}.{ext}" if p != " " else f"{filename}.{ext}"
+                    full_path = (
+                        f"{p}/{filename}.{ext}" if p != " " else f"{filename}.{ext}"
+                    )
                     files.append(full_path)
 
         return files
@@ -295,7 +312,7 @@ class VPKFile:
         """
         self._ensure_parsed()
         all_files = self.list_files()
-        if pattern.endswith('/'):
+        if pattern.endswith("/"):
             return [f for f in all_files if f.startswith(pattern)]
         return [f for f in all_files if fnmatch(f, pattern)]
 
@@ -314,7 +331,7 @@ class VPKFile:
         """
         self._ensure_parsed()
         try:
-            name, ext = filename.rsplit('.', 1)
+            name, ext = filename.rsplit(".", 1)
         except ValueError:
             return None
 
@@ -327,16 +344,24 @@ class VPKFile:
 
         return None
 
-    def _get_file_entry(self, filepath: str) -> Optional[Tuple[str, str, VPKDirectoryEntry]]:
+    def _get_file_entry(
+        self, filepath: str
+    ) -> Optional[Tuple[str, str, VPKDirectoryEntry]]:
         """Get raw directory entry for a file. Use get_file_info() for public API."""
         self._ensure_parsed()
         try:
             extension, directory, filename = _parse_vpk_path(filepath)
 
-            if (extension in self.directory and
-                    directory in self.directory[extension] and
-                    filename in self.directory[extension][directory]):
-                return extension, directory, self.directory[extension][directory][filename]
+            if (
+                extension in self.directory
+                and directory in self.directory[extension]
+                and filename in self.directory[extension][directory]
+            ):
+                return (
+                    extension,
+                    directory,
+                    self.directory[extension][directory][filename],
+                )
         except (AttributeError, KeyError) as e:
             print(f"Error getting file entry: {e}")
         return None
@@ -364,11 +389,13 @@ class VPKFile:
         extension, directory, entry = entry_info
 
         try:
-            file_data = self._read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
+            file_data = self._read_from_archive(
+                entry.archive_index, entry.entry_offset, entry.entry_length
+            )
             if not file_data:
                 return False
 
-            with open(output_path, 'wb') as f:
+            with open(output_path, "wb") as f:
                 if entry.preload_bytes > 0 and entry.preload_data:
                     f.write(entry.preload_data)
                 f.write(file_data)
@@ -378,7 +405,9 @@ class VPKFile:
             print(f"Error extracting file: {e}")
             return False
 
-    def patch_file(self, filepath: str, new_data: bytes, create_backup: bool = False) -> bool:
+    def patch_file(
+        self, filepath: str, new_data: bytes, create_backup: bool = False
+    ) -> bool:
         """Replace a file's contents within the VPK archive.
 
         Args:
@@ -416,10 +445,12 @@ class VPKFile:
             if create_backup:
                 backup_path = f"{archive_path}.backup"
                 if not Path(backup_path).exists():
-                    with open(archive_path, 'rb') as src, open(backup_path, 'wb') as dst:
+                    with open(archive_path, "rb") as src, open(
+                        backup_path, "wb"
+                    ) as dst:
                         dst.write(src.read())
 
-            with open(archive_path, 'rb+') as f:
+            with open(archive_path, "rb+") as f:
                 f.seek(entry.entry_offset)
                 f.write(new_data)
 
@@ -429,7 +460,12 @@ class VPKFile:
             return False
 
     @classmethod
-    def create(cls, source_dir: Union[str, Path], output_base_path: Union[str, Path], split_size: int = None) -> bool:
+    def create(
+        cls,
+        source_dir: Union[str, Path],
+        output_base_path: Union[str, Path],
+        split_size: int = None,
+    ) -> bool:
         """Create a new VPK archive from a directory.
 
         Args:
@@ -478,11 +514,17 @@ class VPKFile:
 
             if split_size is None:
                 # for single-file VPK use the provided path directly
-                output_path = f"{base_output_path}.vpk" if not str(base_output_path).endswith('.vpk') else str(base_output_path)
+                output_path = (
+                    f"{base_output_path}.vpk"
+                    if not str(base_output_path).endswith(".vpk")
+                    else str(base_output_path)
+                )
                 return cls._create_single_vpk(vpk_structure, output_path)
             else:
                 # for multi-file VPK use _dir.vpk naming
-                return cls._create_multi_vpk(vpk_structure, base_output_path, split_size)
+                return cls._create_multi_vpk(
+                    vpk_structure, base_output_path, split_size
+                )
         except Exception as e:
             print(f"Error creating VPK: {e}")
             traceback.print_exc()
@@ -500,13 +542,13 @@ class VPKFile:
             if path not in vpk_structure[extension]:
                 vpk_structure[extension][path] = {}
 
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 content = f.read()
 
             vpk_structure[extension][path][filename] = {
-                'content': content,
-                'size': len(content),
-                'path': file_path
+                "content": content,
+                "size": len(content),
+                "path": file_path,
             }
         return vpk_structure
 
@@ -515,7 +557,9 @@ class VPKFile:
         """Write VPK header structure to file."""
         tree_size_pos = 8
         embed_chunk_length_pos = 12
-        header = struct.pack('<7I', 0x55AA1234, 2, tree_size, embed_chunk_length, 0, 48, 0)
+        header = struct.pack(
+            "<7I", 0x55AA1234, 2, tree_size, embed_chunk_length, 0, 48, 0
+        )
         f.write(header)
         return tree_size_pos, embed_chunk_length_pos
 
@@ -528,30 +572,41 @@ class VPKFile:
         structure = archive_entries if vpk_structure is None else vpk_structure
 
         for extension in sorted(structure.keys()):
-            f.write(extension.encode('ascii') + b'\0')
+            f.write(extension.encode("ascii") + b"\0")
 
             for path in sorted(structure[extension].keys()):
-                f.write(path.encode('ascii') + b'\0')
+                f.write(path.encode("ascii") + b"\0")
 
                 for filename in sorted(structure[extension][path].keys()):
-                    f.write(filename.encode('ascii') + b'\0')
+                    f.write(filename.encode("ascii") + b"\0")
 
                     if archive_entries and vpk_structure is None:
                         entry = archive_entries[extension][path][filename]
-                        f.write(struct.pack('<IHHII', entry['crc'], 0, entry['archive_idx'], entry['offset'], entry['size']))
+                        f.write(
+                            struct.pack(
+                                "<IHHII",
+                                entry["crc"],
+                                0,
+                                entry["archive_idx"],
+                                entry["offset"],
+                                entry["size"],
+                            )
+                        )
                     else:
                         file_info = vpk_structure[extension][path][filename]
-                        content = file_info['content']
+                        content = file_info["content"]
                         crc = zlib.crc32(content) & 0xFFFFFFFF
-                        entry_positions.append((f.tell() + 8, archive_offset, len(content)))
-                        f.write(struct.pack('<IHHII', crc, 0, 0x7FFF, 0, len(content)))
+                        entry_positions.append(
+                            (f.tell() + 8, archive_offset, len(content))
+                        )
+                        f.write(struct.pack("<IHHII", crc, 0, 0x7FFF, 0, len(content)))
                         archive_offset += len(content)
 
-                    f.write(struct.pack('<H', 0xFFFF))
+                    f.write(struct.pack("<H", 0xFFFF))
 
-                f.write(b'\0')
-            f.write(b'\0')
-        f.write(b'\0')
+                f.write(b"\0")
+            f.write(b"\0")
+        f.write(b"\0")
 
         return entry_positions
 
@@ -579,7 +634,7 @@ class VPKFile:
     def _create_single_vpk(vpk_structure, output_path):
         """Create a single-file VPK archive."""
         try:
-            with open(output_path, 'w+b') as f:
+            with open(output_path, "w+b") as f:
                 tree_size_pos, embed_chunk_length_pos = VPKFile._write_vpk_header(f)
                 dir_start = f.tell()
 
@@ -594,22 +649,24 @@ class VPKFile:
                 for extension in sorted(vpk_structure.keys()):
                     for path in sorted(vpk_structure[extension].keys()):
                         for filename in sorted(vpk_structure[extension][path].keys()):
-                            content = vpk_structure[extension][path][filename]['content']
+                            content = vpk_structure[extension][path][filename][
+                                "content"
+                            ]
                             f.write(content)
 
                 embed_chunk_length = f.tell() - data_start
 
                 for pos, offset, length in entry_positions:
                     f.seek(pos)
-                    f.write(struct.pack('<I', current_offset))
+                    f.write(struct.pack("<I", current_offset))
                     current_offset += length
 
                 VPKFile._write_checksums(f, dir_start, dir_size)
 
                 f.seek(tree_size_pos)
-                f.write(struct.pack('<I', dir_size))
+                f.write(struct.pack("<I", dir_size))
                 f.seek(embed_chunk_length_pos)
-                f.write(struct.pack('<I', embed_chunk_length))
+                f.write(struct.pack("<I", embed_chunk_length))
 
             return True
         except Exception as e:
@@ -631,8 +688,8 @@ class VPKFile:
                     for path in sorted(vpk_structure[extension].keys()):
                         for filename in sorted(vpk_structure[extension][path].keys()):
                             file_info = vpk_structure[extension][path][filename]
-                            content = file_info['content']
-                            size = file_info['size']
+                            content = file_info["content"]
+                            size = file_info["size"]
 
                             if current_size + size > split_size and current_size > 0:
                                 if current_archive_file:
@@ -642,8 +699,10 @@ class VPKFile:
                                 current_archive_file = None
 
                             if current_archive_file is None:
-                                archive_path = f"{base_output_path}_{current_archive_idx:03d}.vpk"
-                                current_archive_file = open(archive_path, 'wb')
+                                archive_path = (
+                                    f"{base_output_path}_{current_archive_idx:03d}.vpk"
+                                )
+                                current_archive_file = open(archive_path, "wb")
                                 current_archive_pos = 0
 
                             crc = zlib.crc32(content) & 0xFFFFFFFF
@@ -654,10 +713,10 @@ class VPKFile:
                                 archive_entries[extension][path] = {}
 
                             archive_entries[extension][path][filename] = {
-                                'archive_idx': current_archive_idx,
-                                'offset': current_archive_pos,
-                                'size': size,
-                                'crc': crc
+                                "archive_idx": current_archive_idx,
+                                "offset": current_archive_pos,
+                                "size": size,
+                                "crc": crc,
                             }
 
                             current_archive_file.write(content)
@@ -669,7 +728,7 @@ class VPKFile:
 
             # create directory file
             dir_path = f"{base_output_path}_dir.vpk"
-            with open(dir_path, 'w+b') as dir_f:
+            with open(dir_path, "w+b") as dir_f:
                 tree_size_pos, _ = VPKFile._write_vpk_header(dir_f)
                 dir_start = dir_f.tell()
 
@@ -681,7 +740,7 @@ class VPKFile:
                 VPKFile._write_checksums(dir_f, dir_start, dir_size)
 
                 dir_f.seek(tree_size_pos)
-                dir_f.write(struct.pack('<I', dir_size))
+                dir_f.write(struct.pack("<I", dir_size))
 
             return True
         except Exception as e:
@@ -693,7 +752,9 @@ class VPKFile:
         if not self._parsed:
             self.parse_directory()
 
-    def extract_all(self, output_dir: Union[str, Path], pattern: Optional[str] = None) -> int | None:
+    def extract_all(
+        self, output_dir: Union[str, Path], pattern: Optional[str] = None
+    ) -> int | None:
         """Extract multiple files to a directory.
 
         Args:
@@ -726,9 +787,15 @@ class VPKFile:
             for extension in self.directory:
                 for directory in self.directory[extension]:
                     for filename, entry in self.directory[extension][directory].items():
-                        filepath = f"{directory}/{filename}.{extension}" if directory != " " else f"{filename}.{extension}"
+                        filepath = (
+                            f"{directory}/{filename}.{extension}"
+                            if directory != " "
+                            else f"{filename}.{extension}"
+                        )
                         if filepath in matching_files:
-                            files_to_extract.append((extension, directory, filename, entry))
+                            files_to_extract.append(
+                                (extension, directory, filename, entry)
+                            )
         else:
             for extension in self.directory:
                 for directory in self.directory[extension]:
@@ -742,24 +809,28 @@ class VPKFile:
             for extension, directory, filename, entry in files_to_extract:
                 try:
                     if directory != " ":
-                        parent_dir = output_dir_str + '/' + directory
+                        parent_dir = output_dir_str + "/" + directory
                         if parent_dir not in created_dirs:
                             Path(parent_dir).mkdir(parents=True, exist_ok=True)
                             created_dirs.add(parent_dir)
-                        full_output_path = parent_dir + '/' + filename + '.' + extension
+                        full_output_path = parent_dir + "/" + filename + "." + extension
                     else:
-                        full_output_path = output_dir_str + '/' + filename + '.' + extension
+                        full_output_path = (
+                            output_dir_str + "/" + filename + "." + extension
+                        )
 
                     archive_path = self._get_archive_path(entry.archive_index)
                     if archive_path not in open_archives:
-                        open_archives[archive_path] = open(archive_path, 'rb')
+                        open_archives[archive_path] = open(archive_path, "rb")
 
                     archive_file = open_archives[archive_path]
-                    adjusted_offset = entry.entry_offset + (self._header_and_tree_offset if not self._is_dir_vpk else 0)
+                    adjusted_offset = entry.entry_offset + (
+                        self._header_and_tree_offset if not self._is_dir_vpk else 0
+                    )
                     archive_file.seek(adjusted_offset)
                     file_data = archive_file.read(entry.entry_length)
 
-                    with open(full_output_path, 'wb') as f:
+                    with open(full_output_path, "wb") as f:
                         if entry.preload_bytes > 0 and entry.preload_data:
                             f.write(entry.preload_data)
                         f.write(file_data)
@@ -795,7 +866,9 @@ class VPKFile:
         extension, directory, entry = entry_info
 
         try:
-            file_data = self._read_from_archive(entry.archive_index, entry.entry_offset, entry.entry_length)
+            file_data = self._read_from_archive(
+                entry.archive_index, entry.entry_offset, entry.entry_length
+            )
             if not file_data:
                 return None
 
@@ -849,11 +922,11 @@ class VPKFile:
 
         extension, directory, entry = entry_info
         return {
-            'size': entry.entry_length,
-            'crc': entry.crc,
-            'archive_index': entry.archive_index,
-            'offset': entry.entry_offset,
-            'preload_bytes': entry.preload_bytes,
-            'extension': extension,
-            'directory': directory
+            "size": entry.entry_length,
+            "crc": entry.crc,
+            "archive_index": entry.archive_index,
+            "offset": entry.entry_offset,
+            "preload_bytes": entry.preload_bytes,
+            "extension": extension,
+            "directory": directory,
         }

@@ -8,6 +8,7 @@ class PCFVersion(StrEnum):
     Each version represents a different encoding format for particle files.
     DMX_BINARY2_PCF1 is the default in this library.
     """
+
     DMX_BINARY2_DMX1 = "<!-- dmx encoding binary 2 format dmx 1 -->"
     DMX_BINARY2_PCF1 = "<!-- dmx encoding binary 2 format pcf 1 -->"
     DMX_BINARY3_PCF1 = "<!-- dmx encoding binary 3 format pcf 1 -->"
@@ -19,6 +20,7 @@ class AttributeType(IntEnum):
     Defines all supported attribute types including basic types (int, float, bool),
     vectors, matrices, and array variants of each type.
     """
+
     ELEMENT = 0x01
     INTEGER = 0x02
     FLOAT = 0x03
@@ -51,17 +53,16 @@ class AttributeType(IntEnum):
 
 # conversion for type values
 ATTRIBUTE_VALUES: Dict[AttributeType, str] = {
-    AttributeType.ELEMENT: '<I',
-    AttributeType.INTEGER: '<i',
-    AttributeType.FLOAT: '<f',
-    AttributeType.BOOLEAN: 'B',
-    AttributeType.STRING: '<H',
-    AttributeType.BINARY: '<I',
-    AttributeType.COLOR: '<4B',
-    AttributeType.VECTOR2: '<2f',
-    AttributeType.VECTOR3: '<3f',
-    AttributeType.VECTOR4: '<4f',
-    AttributeType.MATRIX: '<4f',
-    AttributeType.ELEMENT_ARRAY: '<I',
+    AttributeType.ELEMENT: "<I",
+    AttributeType.INTEGER: "<i",
+    AttributeType.FLOAT: "<f",
+    AttributeType.BOOLEAN: "B",
+    AttributeType.STRING: "<H",
+    AttributeType.BINARY: "<I",
+    AttributeType.COLOR: "<4B",
+    AttributeType.VECTOR2: "<2f",
+    AttributeType.VECTOR3: "<3f",
+    AttributeType.VECTOR4: "<4f",
+    AttributeType.MATRIX: "<4f",
+    AttributeType.ELEMENT_ARRAY: "<I",
 }
-
