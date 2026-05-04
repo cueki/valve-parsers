@@ -4,6 +4,7 @@ A Python library for parsing Valve game files, extracted from my casual-preloade
 
 - **VPK (Valve Package)** files - Valve's archive format used in Source engine games
 - **PCF (Particle)** files - Valve's particle system files - **See constants.py for supported versions**
+- **MDL (Source model)** files - read `materials[]` / `materialDirectories[]`
 
 ## Features
 
@@ -91,6 +92,25 @@ if vpk.file_exists(target_file):
     
         # Now patch the file
         vpk.patch_file(target_file, new_texture_data, create_backup=False)
+```
+
+### MDL Files
+
+```python
+from valve_parsers import MDLFile
+
+# Open and parse a MDL file
+mdl = MDLFile("path/to/model.mdl")
+
+print(f"version: {mdl.version}")
+print(f"checksum: 0x{mdl.checksum:08X}")
+print(f"name: {mdl.name}")
+print(f"materials: {mdl.materials}")
+print(f"material_dirs: {mdl.material_dirs}")
+
+# Rewrite materialDirectories[] in place. New strings are appended at EOF.
+new_dirs = [d.replace("models\\", "console\\models\\") for d in mdl.material_dirs]
+mdl.rewrite_material_dirs(new_dirs)
 ```
 
 ### PCF Files
@@ -216,6 +236,28 @@ Represents a particle system element.
 - `data_signature: bytes` - 16-byte signature
 - `attributes: Dict[bytes, Tuple[AttributeType, Any]]` - Element attributes
 
+### MDLFile
+
+The main class for reading and rewriting Source MDL model files.
+
+#### Constructor
+- `MDLFile(mdl_path: Union[str, Path], auto_parse: bool = True)` - Initialize with path to MDL file
+  - `mdl_path`: Path to the MDL file
+  - `auto_parse`: Automatically parse on init (default: True)
+
+#### Methods
+- `parse() -> MDLFile` - Parse the MDL header (called automatically unless `auto_parse=False`)
+- `rewrite_material_dirs(new_dirs: List[str], *, update_data_length: bool = True) -> None` - Replace `materialDirectories[]` in place
+
+#### Properties
+- `version: int` - MDL format version
+- `checksum: int` - MDL checksum
+- `name: str` - Internal model name
+- `data_length: int` - Header `dataLength` field
+- `file_size: int` - Current size of the file on disk
+- `materials: List[str]` - Material names referenced by the model
+- `material_dirs: List[str]` - Search directories the engine looks in for those materials
+
 ### Constants
 
 - `PCFVersion` - Enum of supported PCF versions
@@ -223,7 +265,7 @@ Represents a particle system element.
 
 ## Supported Games
 
-This library works with VPK and PCF files from Orange Box titles. 
+This library works with files from Orange Box titles. 
 Mostly intended for TF2, YMMV with other games.
 
 See: 
@@ -232,11 +274,15 @@ https://developer.valvesoftware.com/wiki/PCF
 
 https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
+https://developer.valvesoftware.com/wiki/MDL_(Source)
+
 ## Contributing
 
 This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.2.0
+- Start of MDL parser (`MDLFile`)
 ### 1.0.7
 - Performance: Replaced rglob with os.walk for VPK creation
 - Performance: Replaced Path.match with fnmatch in find_files()

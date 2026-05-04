@@ -3,6 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import BinaryIO, Any, List, Dict, Tuple, Union, Optional
 from .constants import PCFVersion, AttributeType, ATTRIBUTE_VALUES
+from ._io import read_cstring_stream, write_cstring
 
 # see: https://developer.valvesoftware.com/wiki/PCF
 
@@ -52,38 +53,6 @@ class PCFFile:
         self.elements: List[PCFElement] = []
         self.input_file = Path(input_file)
 
-    @staticmethod
-    def _read_null_terminated_string(file: BinaryIO):
-        """Read a null-terminated string from a binary file.
-
-        Args:
-            file: File object to read from.
-
-        Returns:
-            The string as bytes (excluding the null terminator).
-        """
-        chars = bytearray()
-        while True:
-            char = file.read(1)
-            if not char or char == b"\x00":
-                break
-            chars.extend(char)
-        return bytes(chars)
-
-    @staticmethod
-    def _write_null_terminated_string(file: BinaryIO, string: Union[str, bytes]):
-        """Write a null-terminated string to a binary file.
-
-        Args:
-            file: File object to write to.
-            string: String to write (str or bytes). Strings are encoded as ASCII.
-        """
-        if isinstance(string, str):
-            encoded = string.encode("ascii", errors="replace")
-        else:
-            encoded = string
-        file.write(encoded + b"\x00")
-
     def _write_attribute_data(
         self, file: BinaryIO, attr_type: AttributeType, value: Any
     ) -> None:
@@ -104,7 +73,7 @@ class PCFFile:
             if isinstance(value, str):
                 value = value.encode("ascii", errors="replace")
 
-            self._write_null_terminated_string(file, value)
+            write_cstring(file, value)
             return
 
         if attr_type == AttributeType.MATRIX:
@@ -154,7 +123,7 @@ class PCFFile:
             return bool(file.read(1)[0])
 
         if attr_type == AttributeType.STRING:
-            return self._read_null_terminated_string(file)
+            return read_cstring_stream(file)
 
         if attr_type == AttributeType.BINARY:
             length = struct.unpack(ATTRIBUTE_VALUES.get(attr_type), file.read(4))[0]
@@ -200,7 +169,7 @@ class PCFFile:
         with open(output_path, "wb") as file:
             # write header
             version_string = getattr(PCFVersion, self.version)
-            self._write_null_terminated_string(file, f"{version_string}\n")
+            write_cstring(file, f"{version_string}\n")
 
             # write string dictionary
             file.write(struct.pack("<H", len(self.string_dictionary)))
@@ -244,7 +213,7 @@ class PCFFile:
         """
         with open(self.input_file, "rb") as file:
             # read header
-            header = self._read_null_terminated_string(file)
+            header = read_cstring_stream(file)
             header_str = header.decode("ascii", errors="replace")
 
             for ver_attr in dir(PCFVersion):
@@ -261,14 +230,14 @@ class PCFFile:
 
             # store strings as bytes
             for _ in range(count):
-                string = self._read_null_terminated_string(file)
+                string = read_cstring_stream(file)
                 self.string_dictionary.append(string)
 
             # read element dictionary
             element_count = struct.unpack("<I", file.read(4))[0]
             for _ in range(element_count):
                 type_name_index = struct.unpack("<H", file.read(2))[0]
-                element_name = self._read_null_terminated_string(file)
+                element_name = read_cstring_stream(file)
                 data_signature = file.read(16)
 
                 element = PCFElement(

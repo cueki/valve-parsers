@@ -8,6 +8,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Optional, BinaryIO, List, Tuple, Union, Any
 
+from ._io import read_cstring_stream
+
 # see: https://developer.valvesoftware.com/wiki/VPK_(file_format)
 
 
@@ -85,22 +87,9 @@ _NON_PRINTABLE = bytes(b for b in range(256) if not (32 <= b <= 126))
 
 
 def _read_null_string(file: BinaryIO) -> str:
-    """Read a null-terminated ASCII string from a binary file."""
-    chunks = []
-
-    while True:
-        chunk = file.read(256)
-        if not chunk:
-            break
-
-        null_pos = chunk.find(b"\x00")
-        if null_pos != -1:
-            chunks.append(chunk[:null_pos])
-            file.seek(-(len(chunk) - null_pos - 1), 1)
-            break
-        chunks.append(chunk)
-
-    raw = b"".join(chunks)
+    """Read a null-terminated ASCII string, filtering non-printable bytes
+    (paranoia for corrupt VPK directory entries)."""
+    raw = read_cstring_stream(file, chunked=True)
     result = raw.translate(None, _NON_PRINTABLE)
 
     if raw and not result:
