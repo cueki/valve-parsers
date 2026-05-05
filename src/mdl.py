@@ -167,6 +167,64 @@ class MDLFile:
         if update_data_length:
             self.data_length = len(buf)
 
+    def rewrite_materials(
+        self,
+        new_materials: List[str],
+        *,
+        update_data_length: bool = True,
+    ) -> None:
+        """Replace per-material name strings in place.
+
+        Appends each new string at EOF and rewrites each material entry's
+        nameIndex (int32, relative to that entry's own start). No existing
+        bytes are shifted, so all other offsets in the file remain valid.
+
+        Useful when relocating model materials on disk: some MDLs are
+        compiled with `$cdmaterials` blank and the full path baked into the
+        material name itself (yielding an empty material_dir entry paired
+        with a path-rooted name like `models/foo/bar`). Moving the on-disk
+        folder requires re-prefixing those names too.
+
+        Args:
+            new_materials: Replacement material name strings. Must have the
+                same length as the existing materials[].
+            update_data_length: Whether to update the dataLength header field
+                to match the new file size. Defaults to True.
+
+        Raises:
+            ValueError: If new_materials length doesn't match the existing
+                count, or if the file is no longer a valid MDL.
+        """
+        self._ensure_parsed()
+        buf = bytearray(Path(self.mdl_path).read_bytes())
+
+        if buf[_OFF_ID:_OFF_ID + 4] != _MDL_ID:
+            raise ValueError(f"not an MDL file: {self.mdl_path}")
+
+        (mat_count,) = struct.unpack_from("<i", buf, _OFF_MATERIAL_COUNT)
+        (mat_offset,) = struct.unpack_from("<i", buf, _OFF_MATERIAL_OFFSET)
+
+        if len(new_materials) != mat_count:
+            raise ValueError(
+                f"new_materials has {len(new_materials)} entries but MDL has {mat_count}"
+            )
+
+        for i, name in enumerate(new_materials):
+            entry_pos = mat_offset + i * _MATERIAL_ENTRY_SIZE
+            new_off = len(buf)
+            buf.extend(name.encode("ascii") + b"\x00")
+            struct.pack_into("<i", buf, entry_pos, new_off - entry_pos)
+
+        if update_data_length:
+            struct.pack_into("<i", buf, _OFF_DATA_LENGTH, len(buf))
+
+        Path(self.mdl_path).write_bytes(buf)
+
+        self.materials = list(new_materials)
+        self.file_size = len(buf)
+        if update_data_length:
+            self.data_length = len(buf)
+
     def _ensure_parsed(self) -> None:
         if not self._parsed:
             self.parse()

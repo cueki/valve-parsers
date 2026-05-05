@@ -4,7 +4,7 @@ A Python library for parsing Valve game files, extracted from my casual-preloade
 
 - **VPK (Valve Package)** files - Valve's archive format used in Source engine games
 - **PCF (Particle)** files - Valve's particle system files - **See constants.py for supported versions**
-- **MDL (Source model)** files - read `materials[]` / `materialDirectories[]`
+- **MDL (Model)** files - read `materials[]` / `materialDirectories[]`
 
 ## Features
 
@@ -281,6 +281,8 @@ https://developer.valvesoftware.com/wiki/MDL_(Source)
 This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.2.1
+- Added support for empty paths in model strings
 ### 1.2.0
 - Start of MDL parser (`MDLFile`)
 ### 1.0.7
