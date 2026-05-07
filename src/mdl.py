@@ -119,21 +119,22 @@ class MDLFile:
         *,
         update_data_length: bool = True,
     ) -> None:
-        """Replace materialDirectories[] with new_dirs in place.
+        """Replace materialDirectories[] with new_dirs.
 
-        Appends each new string at EOF and rewrites the offset table to point
-        at them. No existing bytes are shifted, so all other offsets in the
-        file remain valid.
+        Appends each new string at EOF. When `len(new_dirs) == dir_count`, the
+        existing int32 offset table is overwritten in place. When the lengths
+        differ (growing or shrinking), a fresh int32 table is appended at EOF
+        and the header's count + offset fields are updated to point at it; the
+        old table bytes become orphaned.
 
         Args:
-            new_dirs: Replacement material directories. Must have the same
-                length as the existing materialDirectories[].
+            new_dirs: Replacement material directories. Length may differ from
+                the existing materialDirectories[].
             update_data_length: Whether to update the dataLength header field
                 to match the new file size. Defaults to True.
 
         Raises:
-            ValueError: If new_dirs length doesn't match the existing count,
-                or if the file is no longer a valid MDL.
+            ValueError: If the file is no longer a valid MDL.
         """
         self._ensure_parsed()
         buf = bytearray(Path(self.mdl_path).read_bytes())
@@ -144,18 +145,21 @@ class MDLFile:
         (dir_count,) = struct.unpack_from("<i", buf, _OFF_MATERIAL_DIR_COUNT)
         (dir_offset,) = struct.unpack_from("<i", buf, _OFF_MATERIAL_DIR_OFFSET)
 
-        if len(new_dirs) != dir_count:
-            raise ValueError(
-                f"new_dirs has {len(new_dirs)} entries but MDL has {dir_count}"
-            )
-
         new_offsets: List[int] = []
         for s in new_dirs:
             new_offsets.append(len(buf))
             buf.extend(s.encode("ascii") + b"\x00")
 
-        for i, new_off in enumerate(new_offsets):
-            struct.pack_into("<i", buf, dir_offset + i * 4, new_off)
+        if len(new_dirs) == dir_count:
+            for i, new_off in enumerate(new_offsets):
+                struct.pack_into("<i", buf, dir_offset + i * 4, new_off)
+            new_dir_offset = dir_offset
+        else:
+            new_dir_offset = len(buf)
+            for new_off in new_offsets:
+                buf.extend(struct.pack("<i", new_off))
+            struct.pack_into("<i", buf, _OFF_MATERIAL_DIR_COUNT, len(new_dirs))
+            struct.pack_into("<i", buf, _OFF_MATERIAL_DIR_OFFSET, new_dir_offset)
 
         if update_data_length:
             struct.pack_into("<i", buf, _OFF_DATA_LENGTH, len(buf))
@@ -163,6 +167,7 @@ class MDLFile:
         Path(self.mdl_path).write_bytes(buf)
 
         self.material_dirs = list(new_dirs)
+        self._material_dir_offset = new_dir_offset
         self.file_size = len(buf)
         if update_data_length:
             self.data_length = len(buf)

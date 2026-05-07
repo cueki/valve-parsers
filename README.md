@@ -281,6 +281,8 @@ https://developer.valvesoftware.com/wiki/MDL_(Source)
 This library was yoinked from my casual-pre-loader project. Contributions are welcome!
 
 ## Changelog
+### 1.2.2
+- Added support for path lists to grow in size
 ### 1.2.1
 - Added support for empty paths in model strings
 ### 1.2.0
